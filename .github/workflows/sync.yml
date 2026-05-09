@@ -1,0 +1,40 @@
+name: Sync Pipeline
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 */12 * * *' # Scheduled log rotation
+
+jobs:
+  system_sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch repository
+        uses: actions/checkout@v4
+
+      - name: State Verification
+        id: hydra
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GToken }}
+        run: |
+          IN_PROGRESS=$(gh run list --workflow="Sync Pipeline" --status=in_progress --json databaseId -q "[.[] | select(.databaseId != ${{ github.run_id }})] | length")
+          if [ "$IN_PROGRESS" -gt 0 ]; then
+            echo "Operation in progress. Skipping redundant run."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Prep Environment
+        if: github.event_name != 'schedule' || steps.hydra.outputs.skip != 'true'
+        run: curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Execute Maintenance
+        if: github.event_name != 'schedule' || steps.hydra.outputs.skip != 'true'
+        env:
+          Tailscale_Key: ${{ secrets.Tailscale_Key }}
+          GH_TOKEN: ${{ secrets.GToken }}
+        run: |
+          chmod +x maint.sh
+          ./maint.sh
